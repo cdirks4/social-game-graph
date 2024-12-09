@@ -49,45 +49,73 @@ export default function DynamicView() {
   const getCurrentDistribution = (round: number) => {
     if (!game)
       return {
-        counts: { apple: 0, banana: 0 },
-        percentages: { apple: "0", banana: "0" },
+        counts: {},
+        percentages: {},
       };
 
     const currentRoundData = game.rounds.find((r) => r.round_number === round);
 
     if (!currentRoundData) {
+      const emptyDistribution = game.options.reduce((acc, option) => {
+        acc[option] = 0;
+        return acc;
+      }, {} as Record<string, number>);
+
       return {
-        counts: { apple: 0, banana: 0 },
-        percentages: { apple: "0", banana: "0" },
+        counts: emptyDistribution,
+        percentages: Object.keys(emptyDistribution).reduce((acc, key) => {
+          acc[key] = "0";
+          return acc;
+        }, {} as Record<string, string>),
       };
     }
 
-    const counts = { apple: 0, banana: 0 };
+    // Initialize counts for all options
+    const counts = game.options.reduce((acc, option) => {
+      acc[option] = 0;
+      return acc;
+    }, {} as Record<string, number>);
+
+    // Count final guesses
     currentRoundData.pairs.forEach((pair) => {
       Object.values(pair.final_guesses).forEach((guess) => {
-        if (guess === "apple" || guess === "banana") {
+        if (counts.hasOwnProperty(guess)) {
           counts[guess]++;
         }
       });
     });
 
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
-    return {
-      counts,
-      percentages: {
-        apple: ((counts.apple / total) * 100).toFixed(1),
-        banana: ((counts.banana / total) * 100).toFixed(1),
-      },
-    };
+    const percentages = Object.keys(counts).reduce((acc, key) => {
+      acc[key] = ((counts[key] / total) * 100).toFixed(1);
+      return acc;
+    }, {} as Record<string, string>);
+
+    return { counts, percentages };
   };
 
   const pieData = {
-    labels: ["Apple", "Banana"],
+    labels:
+      game?.options.map(
+        (option) => option.charAt(0).toUpperCase() + option.slice(1)
+      ) || [],
     datasets: [
       {
         data: Object.values(getCurrentDistribution(currentRound).counts),
-        backgroundColor: ["rgba(255, 99, 132, 0.8)", "rgba(255, 205, 86, 0.8)"],
-        borderColor: ["rgba(255, 99, 132, 1)", "rgba(255, 205, 86, 1)"],
+        backgroundColor: [
+          "rgba(255, 99, 132, 0.8)", // Red (guava)
+          "rgba(255, 205, 86, 0.8)", // Yellow (lychee)
+          "rgba(255, 159, 64, 0.8)", // Orange (dragonfruit)
+          "rgba(153, 102, 255, 0.8)", // Purple (persimmon)
+          "rgba(255, 159, 132, 0.8)", // Pink (papaya)
+        ],
+        borderColor: [
+          "rgba(255, 99, 132, 1)",
+          "rgba(255, 205, 86, 1)",
+          "rgba(255, 159, 64, 1)",
+          "rgba(153, 102, 255, 1)",
+          "rgba(255, 159, 132, 1)",
+        ],
         borderWidth: 1,
       },
     ],
@@ -123,6 +151,74 @@ export default function DynamicView() {
     },
   };
 
+  // Add function to reconstruct rounds from agent histories
+  const reconstructRounds = (game: GameData) => {
+    const rounds: Record<
+      number,
+      {
+        round_number: number;
+        pairs: Array<{
+          agent_1_id: string;
+          agent_2_id: string;
+          initial_guesses: Record<string, string>;
+          final_guesses: Record<string, string>;
+          rewards: Record<string, number>;
+        }>;
+      }
+    > = {};
+
+    // Process each agent's history
+    game.agents.forEach((agent) => {
+      agent.history.forEach((interaction) => {
+        const round = interaction.round;
+
+        if (!rounds[round]) {
+          rounds[round] = {
+            round_number: round,
+            pairs: [],
+          };
+        }
+
+        // Check if this pair is already added (from the other agent's perspective)
+        const existingPair = rounds[round].pairs.find(
+          (pair) =>
+            (pair.agent_1_id === agent.agent_id &&
+              pair.agent_2_id === interaction.partner_id) ||
+            (pair.agent_2_id === agent.agent_id &&
+              pair.agent_1_id === interaction.partner_id)
+        );
+
+        if (!existingPair) {
+          rounds[round].pairs.push({
+            agent_1_id: agent.agent_id,
+            agent_2_id: interaction.partner_id,
+            initial_guesses: {
+              [agent.agent_id]: interaction.initial_guess,
+            },
+            final_guesses: {
+              [agent.agent_id]: interaction.final_guess,
+            },
+            rewards: {
+              [agent.agent_id]: interaction.reward,
+            },
+          });
+        } else {
+          // Update existing pair with this agent's information
+          existingPair.initial_guesses[agent.agent_id] =
+            interaction.initial_guess;
+          existingPair.final_guesses[agent.agent_id] = interaction.final_guess;
+          existingPair.rewards[agent.agent_id] = interaction.reward;
+        }
+      });
+    });
+
+    // Convert to array and sort by round number
+    return Object.values(rounds).sort(
+      (a, b) => a.round_number - b.round_number
+    );
+  };
+
+  // Update the useEffect where we fetch data
   useEffect(() => {
     const fetchGameData = async () => {
       try {
@@ -131,9 +227,16 @@ export default function DynamicView() {
           throw new Error("Failed to fetch game data");
         }
         const data = await response.json();
-        setGame(data[0]); // Get first game from array
+        console.log("API Response:", data);
+
+        // Reconstruct rounds data
+        const gameData = data[0];
+        gameData.rounds = reconstructRounds(gameData);
+
+        setGame(gameData);
         setIsLoading(false);
       } catch (err) {
+        console.error("Fetch error:", err);
         setError(
           err instanceof Error ? err.message : "Failed to fetch game data"
         );
@@ -422,9 +525,13 @@ export default function DynamicView() {
                 <Pie data={pieData} options={pieOptions} />
               </div>
               <div className="mt-4 text-center text-sm text-gray-600">
-                {getCurrentDistribution(currentRound).percentages.apple}% Apple
-                | {getCurrentDistribution(currentRound).percentages.banana}%
-                Banana
+                {Object.entries(
+                  getCurrentDistribution(currentRound).percentages
+                ).map(([option, percentage]) => (
+                  <div key={option} className="capitalize">
+                    {option}: {percentage}%
+                  </div>
+                ))}
               </div>
               <div className="mt-2 text-center text-xs text-gray-500">
                 Target: {game.convergence_threshold * 100}% for convergence
