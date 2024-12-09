@@ -12,7 +12,6 @@ import {
   Legend,
   ArcElement,
 } from "chart.js";
-import { gamesData } from "@/gameData";
 import { Pie } from "react-chartjs-2";
 
 ChartJS.register(
@@ -27,20 +26,22 @@ ChartJS.register(
 );
 
 export default function DynamicView() {
-  const [selectedGame, setSelectedGame] = useState<GameData>(
-    gamesData.games[0]
-  );
+  const [game, setGame] = useState<GameData | null>(null);
   const [currentRound, setCurrentRound] = useState(1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1000);
-  const [agentHistory, setAgentHistory] = useState<Record<string, string[]>>(
-    {}
-  );
+  const [agentHistory, setAgentHistory] = useState({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const getCurrentDistribution = (round: number) => {
-    const currentRoundData = selectedGame.rounds.find(
-      (r) => r.round_number === round
-    );
+    if (!game)
+      return {
+        counts: { apple: 0, banana: 0 },
+        percentages: { apple: "0", banana: "0" },
+      };
+
+    const currentRoundData = game.rounds.find((r) => r.round_number === round);
 
     if (!currentRoundData) {
       return {
@@ -111,29 +112,54 @@ export default function DynamicView() {
   };
 
   useEffect(() => {
+    const fetchGameData = async () => {
+      try {
+        const response = await fetch("http://localhost:8000/");
+        if (!response.ok) {
+          throw new Error("Failed to fetch game data");
+        }
+        const data = await response.json();
+        setGame(data[0]); // Get first game from array
+        setIsLoading(false);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to fetch game data"
+        );
+        setIsLoading(false);
+      }
+    };
+
+    fetchGameData();
+  }, []);
+
+  useEffect(() => {
+    // Skip if game is null
+    if (!game) return;
+
     // Reset round when game changes
     setCurrentRound(1);
     setIsPlaying(false);
 
     // Initialize agent history for new game
     const newHistory: Record<string, string[]> = {};
-    selectedGame.agents.forEach((agent) => {
+    game.agents.forEach((agent) => {
       newHistory[agent.agent_id] = []; // Start with empty history
     });
     setAgentHistory(newHistory);
-  }, [selectedGame]);
+  }, [game]);
 
   useEffect(() => {
+    // Skip if game is null
+    if (!game) return;
+
     const newHistory: Record<string, string[]> = {};
 
-    selectedGame.agents.forEach((agent) => {
+    game.agents.forEach((agent) => {
       newHistory[agent.agent_id] = Array(currentRound).fill("");
     });
 
     for (let roundNum = 1; roundNum <= currentRound; roundNum++) {
-      const round = selectedGame.rounds.find(
-        (r) => r.round_number === roundNum
-      );
+      const round = game.rounds.find((r) => r.round_number === roundNum);
       if (round) {
         round.pairs.forEach((pair) => {
           const { agent_1_id, agent_2_id, final_guesses } = pair;
@@ -149,14 +175,14 @@ export default function DynamicView() {
     }
 
     setAgentHistory(newHistory);
-  }, [selectedGame, currentRound]);
+  }, [game, currentRound]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (isPlaying && selectedGame) {
+    if (isPlaying && game) {
       interval = setInterval(() => {
         setCurrentRound((prev) => {
-          if (prev >= selectedGame.rounds_played) {
+          if (prev >= game.rounds_played) {
             setIsPlaying(false);
             return prev;
           }
@@ -165,7 +191,7 @@ export default function DynamicView() {
       }, playbackSpeed);
     }
     return () => clearInterval(interval);
-  }, [isPlaying, selectedGame, playbackSpeed]);
+  }, [isPlaying, game, playbackSpeed]);
 
   const getRewardColor = (reward: number) => {
     if (reward >= 0.7) return "text-green-600";
@@ -186,31 +212,29 @@ export default function DynamicView() {
       : "text-red-600 font-semibold";
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-xl text-gray-600">Loading game data...</div>
+      </div>
+    );
+  }
+
+  if (error || !game) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-xl text-red-600">
+          {error || "Failed to load game data"}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-6xl mx-auto px-4">
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <div className="flex justify-between items-center mb-6">
-            <select
-              className="border rounded p-2"
-              value={selectedGame.game_id}
-              onChange={(e) => {
-                const game = gamesData.games.find(
-                  (g) => g.game_id === e.target.value
-                );
-                if (game) {
-                  setSelectedGame(game);
-                  setCurrentRound(1);
-                  setIsPlaying(false);
-                }
-              }}
-            >
-              {gamesData.games.map((game) => (
-                <option key={game.game_id} value={game.game_id}>
-                  Game {game.game_id}
-                </option>
-              ))}
-            </select>
             <div className="flex gap-4 items-center">
               <button
                 className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
@@ -248,18 +272,18 @@ export default function DynamicView() {
                     Current Round Interactions
                   </h3>
                   <div className="space-y-4">
-                    {selectedGame.rounds
+                    {game.rounds
                       .find((r) => r.round_number === currentRound)
                       ?.pairs.map((pair, index) => {
                         const agent1Color = getDecisionChangeColor(
                           pair.initial_guesses[pair.agent_1_id],
                           pair.final_guesses[pair.agent_1_id],
-                          selectedGame.final_convergence.winning_item
+                          game.final_convergence.winning_item
                         );
                         const agent2Color = getDecisionChangeColor(
                           pair.initial_guesses[pair.agent_2_id],
                           pair.final_guesses[pair.agent_2_id],
-                          selectedGame.final_convergence.winning_item
+                          game.final_convergence.winning_item
                         );
 
                         return (
@@ -322,7 +346,7 @@ export default function DynamicView() {
                   <div className="space-y-2">
                     {Object.entries(agentHistory).map(
                       ([agentId, decisions]) => {
-                        const agent = selectedGame.agents.find(
+                        const agent = game.agents.find(
                           (a) => a.agent_id === agentId
                         );
                         return (
@@ -340,7 +364,7 @@ export default function DynamicView() {
                                   className={`w-8 h-8 rounded-full flex items-center justify-center text-xs
                                   ${
                                     decision ===
-                                    selectedGame.final_convergence.winning_item
+                                    game.final_convergence.winning_item
                                       ? "bg-green-100 text-green-800 border-2 border-green-300"
                                       : decision === "apple"
                                       ? "bg-red-100 text-red-800"
@@ -372,14 +396,13 @@ export default function DynamicView() {
                 Banana
               </div>
               <div className="mt-2 text-center text-xs text-gray-500">
-                Target: {selectedGame.convergence_threshold * 100}% for
-                convergence
+                Target: {game.convergence_threshold * 100}% for convergence
               </div>
             </div>
           </div>
 
           <div className="mt-4 text-center text-gray-600">
-            Round {currentRound} of {selectedGame.rounds_played}
+            Round {currentRound} of {game.rounds_played}
           </div>
         </div>
 
@@ -392,24 +415,18 @@ export default function DynamicView() {
             <div className="border rounded-lg p-4">
               <h3 className="font-semibold mb-2">Convergence Status</h3>
               <div className="text-sm space-y-1">
-                <p>Target: {selectedGame.convergence_threshold * 100}%</p>
-                <p>Final: {selectedGame.final_convergence.percentage}%</p>
-                <p>Winner: {selectedGame.final_convergence.winning_item}</p>
+                <p>Target: {game.convergence_threshold * 100}%</p>
+                <p>Final: {game.final_convergence.percentage}%</p>
+                <p>Winner: {game.final_convergence.winning_item}</p>
               </div>
             </div>
             <div className="border rounded-lg p-4">
               <h3 className="font-semibold mb-2">Current Round Stats</h3>
               <div className="text-sm space-y-1">
-                {selectedGame.statistics.most_popular_item_per_round[
-                  currentRound
-                ] && (
+                {game.statistics.most_popular_item_per_round[currentRound] && (
                   <p>
                     Popular Choice:{" "}
-                    {
-                      selectedGame.statistics.most_popular_item_per_round[
-                        currentRound
-                      ]
-                    }
+                    {game.statistics.most_popular_item_per_round[currentRound]}
                   </p>
                 )}
               </div>
@@ -418,12 +435,9 @@ export default function DynamicView() {
               <h3 className="font-semibold mb-2">Overall Stats</h3>
               <div className="text-sm space-y-1">
                 <p>
-                  Total Rewards:{" "}
-                  {selectedGame.statistics.total_rewards_distributed}
+                  Total Rewards: {game.statistics.total_rewards_distributed}
                 </p>
-                <p>
-                  Avg Reward: {selectedGame.statistics.average_reward_per_agent}
-                </p>
+                <p>Avg Reward: {game.statistics.average_reward_per_agent}</p>
               </div>
             </div>
           </div>

@@ -1,7 +1,3 @@
-export interface GamesData {
-  games: GameData[];
-}
-
 export interface GameData {
   game_id: string;
   num_agents: number;
@@ -60,10 +56,4 @@ interface Pair {
   rewards: {
     [key: string]: number;
   };
-}
-
-export interface APIResponse {
-  success: boolean;
-  data: GamesData;
-  error?: string;
 }
