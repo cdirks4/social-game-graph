@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { GamesData, GameData } from "@/types";
+import { GameData } from "@/types";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -37,16 +37,99 @@ export default function DynamicView() {
     {}
   );
 
-  // Update agent history when round changes
+  const getCurrentDistribution = (round: number) => {
+    const currentRoundData = selectedGame.rounds.find(
+      (r) => r.round_number === round
+    );
+
+    if (!currentRoundData) {
+      return {
+        counts: { apple: 0, banana: 0 },
+        percentages: { apple: "0", banana: "0" },
+      };
+    }
+
+    const counts = { apple: 0, banana: 0 };
+    currentRoundData.pairs.forEach((pair) => {
+      Object.values(pair.final_guesses).forEach((guess) => {
+        if (guess === "apple" || guess === "banana") {
+          counts[guess]++;
+        }
+      });
+    });
+
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    return {
+      counts,
+      percentages: {
+        apple: ((counts.apple / total) * 100).toFixed(1),
+        banana: ((counts.banana / total) * 100).toFixed(1),
+      },
+    };
+  };
+
+  const pieData = {
+    labels: ["Apple", "Banana"],
+    datasets: [
+      {
+        data: Object.values(getCurrentDistribution(currentRound).counts),
+        backgroundColor: ["rgba(255, 99, 132, 0.8)", "rgba(255, 205, 86, 0.8)"],
+        borderColor: ["rgba(255, 99, 132, 1)", "rgba(255, 205, 86, 1)"],
+        borderWidth: 1,
+      },
+    ],
+  };
+
+  const pieOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: "top" as const,
+      },
+      title: {
+        display: true,
+        text: "Current Choice Distribution",
+        font: {
+          size: 16,
+        },
+      },
+      tooltip: {
+        callbacks: {
+          label: (context: { dataIndex: number }) => {
+            const distribution = getCurrentDistribution(currentRound);
+            const labels = ["apple", "banana"];
+            const key = labels[
+              context.dataIndex
+            ] as keyof typeof distribution.percentages;
+            return `${labels[context.dataIndex]}: ${
+              distribution.percentages[key]
+            }%`;
+          },
+        },
+      },
+    },
+  };
+
+  useEffect(() => {
+    // Reset round when game changes
+    setCurrentRound(1);
+    setIsPlaying(false);
+
+    // Initialize agent history for new game
+    const newHistory: Record<string, string[]> = {};
+    selectedGame.agents.forEach((agent) => {
+      newHistory[agent.agent_id] = []; // Start with empty history
+    });
+    setAgentHistory(newHistory);
+  }, [selectedGame]);
+
   useEffect(() => {
     const newHistory: Record<string, string[]> = {};
 
-    // Initialize all agents with their initial choices
     selectedGame.agents.forEach((agent) => {
       newHistory[agent.agent_id] = Array(currentRound).fill("");
     });
 
-    // Fill in the history for each round up to current
     for (let roundNum = 1; roundNum <= currentRound; roundNum++) {
       const round = selectedGame.rounds.find(
         (r) => r.round_number === roundNum
@@ -101,72 +184,6 @@ export default function DynamicView() {
     return finalGuess === winningItem
       ? "text-green-600 font-semibold"
       : "text-red-600 font-semibold";
-  };
-
-  const getCurrentDistribution = () => {
-    const round = selectedGame.rounds.find(
-      (r) => r.round_number === currentRound
-    );
-    if (!round) return { apple: 0, banana: 0 };
-
-    const counts = { apple: 0, banana: 0 };
-    round.pairs.forEach((pair) => {
-      Object.values(pair.final_guesses).forEach((guess) => {
-        counts[guess as keyof typeof counts]++;
-      });
-    });
-
-    const total = Object.values(counts).reduce((a, b) => a + b, 0);
-    return {
-      counts,
-      percentages: {
-        apple: ((counts.apple / total) * 100).toFixed(1),
-        banana: ((counts.banana / total) * 100).toFixed(1),
-      },
-    };
-  };
-
-  const pieData = {
-    labels: ["Apple", "Banana"],
-    datasets: [
-      {
-        data: Object.values(getCurrentDistribution().counts),
-        backgroundColor: ["rgba(255, 99, 132, 0.8)", "rgba(255, 205, 86, 0.8)"],
-        borderColor: ["rgba(255, 99, 132, 1)", "rgba(255, 205, 86, 1)"],
-        borderWidth: 1,
-      },
-    ],
-  };
-
-  const pieOptions = {
-    responsive: true,
-    plugins: {
-      legend: {
-        position: "top" as const,
-      },
-      title: {
-        display: true,
-        text: "Current Choice Distribution",
-        font: {
-          size: 16,
-        },
-      },
-      tooltip: {
-        callbacks: {
-          label: (context: any) => {
-            const distribution = getCurrentDistribution();
-            const labels = ["apple", "banana"];
-            return `${labels[context.dataIndex]}: ${
-              distribution.percentages[
-                labels[
-                  context.dataIndex
-                ] as keyof typeof distribution.percentages
-              ]
-            }%`;
-          },
-        },
-      },
-    },
   };
 
   return (
@@ -350,8 +367,9 @@ export default function DynamicView() {
                 <Pie data={pieData} options={pieOptions} />
               </div>
               <div className="mt-4 text-center text-sm text-gray-600">
-                {getCurrentDistribution().percentages.apple}% Apple |{" "}
-                {getCurrentDistribution().percentages.banana}% Banana
+                {getCurrentDistribution(currentRound).percentages.apple}% Apple
+                | {getCurrentDistribution(currentRound).percentages.banana}%
+                Banana
               </div>
               <div className="mt-2 text-center text-xs text-gray-500">
                 Target: {selectedGame.convergence_threshold * 100}% for
