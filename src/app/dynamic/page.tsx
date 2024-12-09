@@ -25,6 +25,18 @@ ChartJS.register(
   ArcElement
 );
 
+const getPhaseColor = (round: number) => {
+  if (round < 10) return "text-purple-600";
+  if (round < 15) return "text-orange-600";
+  return "text-green-600";
+};
+
+const getPhaseDescription = (round: number) => {
+  if (round < 10) return "Initial Convergence";
+  if (round < 15) return "Minority Influence";
+  return "New Consensus Formation";
+};
+
 export default function DynamicView() {
   const [game, setGame] = useState<GameData | null>(null);
   const [currentRound, setCurrentRound] = useState(1);
@@ -210,6 +222,25 @@ export default function DynamicView() {
     return finalGuess === winningItem
       ? "text-green-600 font-semibold"
       : "text-red-600 font-semibold";
+  };
+
+  // Add helper function to calculate current convergence
+  const getCurrentConvergence = (round: number, game: GameData) => {
+    const roundData = game.rounds.find((r) => r.round_number === round);
+    if (!roundData) return 0;
+
+    const choices = roundData.pairs.flatMap((pair) =>
+      Object.values(pair.final_guesses)
+    );
+
+    const total = choices.length;
+    const counts = choices.reduce((acc, choice) => {
+      acc[choice] = (acc[choice] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const maxCount = Math.max(...Object.values(counts));
+    return (maxCount / total) * 100;
   };
 
   if (isLoading) {
@@ -415,29 +446,83 @@ export default function DynamicView() {
             <div className="border rounded-lg p-4">
               <h3 className="font-semibold mb-2">Convergence Status</h3>
               <div className="text-sm space-y-1">
-                <p>Target: {game.convergence_threshold * 100}%</p>
-                <p>Final: {game.final_convergence.percentage}%</p>
-                <p>Winner: {game.final_convergence.winning_item}</p>
+                <p>
+                  Current Convergence:{" "}
+                  <span className="font-medium">
+                    {getCurrentConvergence(currentRound, game).toFixed(1)}%
+                  </span>
+                </p>
+                <p>Target: {(game.convergence_threshold * 100).toFixed(1)}%</p>
+                <p className="mt-2 text-xs text-gray-500">
+                  {getCurrentConvergence(currentRound, game) >=
+                  game.convergence_threshold * 100
+                    ? "Group has reached convergence"
+                    : "Group has not yet converged"}
+                </p>
+                <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        (getCurrentConvergence(currentRound, game) /
+                          (game.convergence_threshold * 100)) *
+                          100
+                      )}%`,
+                    }}
+                  />
+                </div>
               </div>
             </div>
+
             <div className="border rounded-lg p-4">
-              <h3 className="font-semibold mb-2">Current Round Stats</h3>
-              <div className="text-sm space-y-1">
-                {game.statistics.most_popular_item_per_round[currentRound] && (
-                  <p>
-                    Popular Choice:{" "}
-                    {game.statistics.most_popular_item_per_round[currentRound]}
-                  </p>
-                )}
-              </div>
-            </div>
-            <div className="border rounded-lg p-4">
-              <h3 className="font-semibold mb-2">Overall Stats</h3>
+              <h3 className="font-semibold mb-2">Phase Analysis</h3>
               <div className="text-sm space-y-1">
                 <p>
-                  Total Rewards: {game.statistics.total_rewards_distributed}
+                  Current Phase:{" "}
+                  <span
+                    className={`font-medium ${getPhaseColor(currentRound)}`}
+                  >
+                    {getPhaseDescription(currentRound)}
+                  </span>
                 </p>
-                <p>Avg Reward: {game.statistics.average_reward_per_agent}</p>
+                <p>
+                  Popular Choice:{" "}
+                  {game.statistics.most_popular_item_per_round[currentRound]}
+                </p>
+                <div className="mt-2 text-xs">
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full bg-purple-500"></div>
+                    <span>Initial Choices</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full bg-orange-500"></div>
+                    <span>Convergence Period</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                    <span>Final Consensus</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="border rounded-lg p-4">
+              <h3 className="font-semibold mb-2">Game Stats</h3>
+              <div className="text-sm space-y-1">
+                <p>
+                  Total Rewards:{" "}
+                  {game.statistics.total_rewards_distributed.toFixed(1)}
+                </p>
+                <p>
+                  Avg Reward:{" "}
+                  {game.statistics.average_reward_per_agent.toFixed(2)}
+                </p>
+                <p>
+                  Rounds to Converge:{" "}
+                  {game.statistics.rounds_until_convergence ||
+                    "Not yet converged"}
+                </p>
               </div>
             </div>
           </div>
